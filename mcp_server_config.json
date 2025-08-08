@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ai-file-manager": {
+      "command": "python",
+      "args": ["main.py"],
+      "env": {
+        "PYTHONPATH": "."
+      }
+    }
+  }
+}
