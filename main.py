@@ -18,7 +18,7 @@ import mimetypes
 from dataclasses import dataclass
 
 # MCP相关导入
-from mcp.server import Server
+from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import (
@@ -541,7 +541,10 @@ async def main():
             InitializationOptions(
                 server_name="ai-file-manager",
                 server_version="1.0.0",
-                capabilities=server.get_capabilities(),
+                capabilities=server.get_capabilities(
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={}
+                ),
             ),
         )
 
