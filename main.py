@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-AI智能文件管理器 MCP服务器
+AI智能文件管理器 MCP服务器 - FastMCP版本
 支持自然语言文件操作指令
 """
 
-import asyncio
 import json
 import logging
 import os
@@ -12,23 +11,14 @@ import shutil
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 import re
 import mimetypes
 from dataclasses import dataclass
 
-# MCP相关导入
-from mcp.server import Server
-from mcp.server.models import InitializationOptions
-from mcp.server.stdio import stdio_server
-from mcp.types import (
-    Resource,
-    Tool,
-    TextContent,
-    ImageContent,
-    EmbeddedResource,
-    LoggingLevel
-)
+# FastMCP导入
+from mcp.server.fastmcp import FastMCP
+from mcp import types
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -45,8 +35,8 @@ class FileSearchCriteria:
     date_to: Optional[datetime] = None
     path: Optional[str] = None
 
-class AIFileManager:
-    """AI文件管理器核心类"""
+class NLPProcessor:
+    """自然语言处理器"""
     
     def __init__(self):
         self.supported_operations = [
@@ -179,77 +169,160 @@ class AIFileManager:
         
         return entities
 
-    def search_files(self, criteria: FileSearchCriteria) -> List[Dict[str, Any]]:
-        """搜索文件"""
-        results = []
-        search_path = Path(criteria.path) if criteria.path else Path.home()
-        
-        try:
-            for file_path in search_path.rglob("*"):
-                if file_path.is_file():
-                    if self._matches_criteria(file_path, criteria):
-                        file_info = self._get_file_info(file_path)
-                        results.append(file_info)
-        except PermissionError as e:
-            logger.warning(f"Permission denied accessing {search_path}: {e}")
-        
-        return results
+# 全局实例
+nlp_processor = NLPProcessor()
+
+# 创建FastMCP应用实例
+app = FastMCP("AI Smart File Manager")
+
+def search_files(criteria: FileSearchCriteria) -> List[Dict[str, Any]]:
+    """搜索文件"""
+    results = []
+    search_path = Path(criteria.path) if criteria.path else Path.home()
     
-    def _matches_criteria(self, file_path: Path, criteria: FileSearchCriteria) -> bool:
-        """检查文件是否符合搜索条件"""
-        # 检查文件名模式
-        if criteria.name_pattern:
-            if not re.search(criteria.name_pattern, file_path.name, re.IGNORECASE):
-                return False
-        
-        # 检查文件类型
-        if criteria.file_type:
-            file_ext = file_path.suffix.lower().lstrip('.')
-            if file_ext not in criteria.file_type:
-                return False
-        
-        # 检查文件大小
-        try:
-            file_size = file_path.stat().st_size
-            if criteria.size_min and file_size < criteria.size_min:
-                return False
-            if criteria.size_max and file_size > criteria.size_max:
-                return False
-        except OSError:
+    try:
+        for file_path in search_path.rglob("*"):
+            if file_path.is_file():
+                if _matches_criteria(file_path, criteria):
+                    file_info = _get_file_info(file_path)
+                    results.append(file_info)
+    except PermissionError as e:
+        logger.warning(f"Permission denied accessing {search_path}: {e}")
+    
+    return results
+
+def _matches_criteria(file_path: Path, criteria: FileSearchCriteria) -> bool:
+    """检查文件是否符合搜索条件"""
+    # 检查文件名模式
+    if criteria.name_pattern:
+        if not re.search(criteria.name_pattern, file_path.name, re.IGNORECASE):
             return False
-        
-        # 检查修改时间
-        try:
-            mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
-            if criteria.date_from and mtime < criteria.date_from:
-                return False
-            if criteria.date_to and mtime > criteria.date_to:
-                return False
-        except OSError:
+    
+    # 检查文件类型
+    if criteria.file_type:
+        file_ext = file_path.suffix.lower().lstrip('.')
+        if file_ext not in criteria.file_type:
             return False
+    
+    # 检查文件大小
+    try:
+        file_size = file_path.stat().st_size
+        if criteria.size_min and file_size < criteria.size_min:
+            return False
+        if criteria.size_max and file_size > criteria.size_max:
+            return False
+    except OSError:
+        return False
+    
+    # 检查修改时间
+    try:
+        mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
+        if criteria.date_from and mtime < criteria.date_from:
+            return False
+        if criteria.date_to and mtime > criteria.date_to:
+            return False
+    except OSError:
+        return False
+    
+    return True
+
+def _get_file_info(file_path: Path) -> Dict[str, Any]:
+    """获取文件信息"""
+    try:
+        stat = file_path.stat()
+        return {
+            "path": str(file_path),
+            "name": file_path.name,
+            "size": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "type": mimetypes.guess_type(str(file_path))[0] or "unknown"
+        }
+    except OSError as e:
+        return {
+            "path": str(file_path),
+            "name": file_path.name,
+            "error": str(e)
+        }
+
+# FastMCP工具定义
+
+@app.tool()
+def natural_language_file_operation(command: str) -> str:
+    """Execute file operations using natural language commands
+    
+    Args:
+        command: Natural language command for file operation
+    """
+    try:
+        parsed = nlp_processor.parse_natural_language(command)
         
-        return True
+        intent = parsed["intent"]
+        entities = parsed["entities"]
+        
+        if intent == "search" or intent == "find" or intent == "list":
+            criteria = FileSearchCriteria(
+                name_pattern="|".join(entities.get("keywords", [])) if entities.get("keywords") else None,
+                file_type=entities.get("file_type"),
+                size_min=entities.get("size_min"),
+                size_max=entities.get("size_max"),
+                date_from=entities.get("date_from"),
+                date_to=entities.get("date_to"),
+                path=entities.get("path")
+            )
+            results = search_files(criteria)
+            return json.dumps(results, indent=2, ensure_ascii=False)
+        
+        elif intent == "unknown":
+            return f"无法理解指令: {command}\n支持的操作: 搜索、移动、复制、删除、创建、压缩文件"
+        
+        else:
+            return f"解析结果: {json.dumps(parsed, indent=2, ensure_ascii=False)}"
     
-    def _get_file_info(self, file_path: Path) -> Dict[str, Any]:
-        """获取文件信息"""
-        try:
-            stat = file_path.stat()
-            return {
-                "path": str(file_path),
-                "name": file_path.name,
-                "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                "type": mimetypes.guess_type(str(file_path))[0] or "unknown"
-            }
-        except OSError as e:
-            return {
-                "path": str(file_path),
-                "name": file_path.name,
-                "error": str(e)
-            }
+    except Exception as e:
+        logger.error(f"Error in natural_language_file_operation: {e}")
+        return f"Error: {str(e)}"
+
+@app.tool()
+def search_files_advanced(
+    name_pattern: Optional[str] = None,
+    file_type: Optional[List[str]] = None,
+    path: Optional[str] = None,
+    size_min: Optional[int] = None,
+    size_max: Optional[int] = None
+) -> str:
+    """Search for files based on criteria
     
-    def move_files(self, source_paths: List[str], destination: str) -> Dict[str, Any]:
-        """移动文件"""
+    Args:
+        name_pattern: File name pattern to match
+        file_type: List of file extensions to search for
+        path: Directory path to search in
+        size_min: Minimum file size in bytes
+        size_max: Maximum file size in bytes
+    """
+    try:
+        criteria = FileSearchCriteria(
+            name_pattern=name_pattern,
+            file_type=file_type,
+            path=path,
+            size_min=size_min,
+            size_max=size_max
+        )
+        results = search_files(criteria)
+        return json.dumps(results, indent=2, ensure_ascii=False)
+    
+    except Exception as e:
+        logger.error(f"Error in search_files_advanced: {e}")
+        return f"Error: {str(e)}"
+
+@app.tool()
+def move_files(source_paths: List[str], destination: str) -> str:
+    """Move files to a destination directory
+    
+    Args:
+        source_paths: List of source file paths to move
+        destination: Destination directory path
+    """
+    try:
         results = {"success": [], "failed": []}
         dest_path = Path(destination)
         
@@ -268,10 +341,21 @@ class AIFileManager:
             except Exception as e:
                 results["failed"].append({"path": source, "error": str(e)})
         
-        return results
+        return json.dumps(results, indent=2, ensure_ascii=False)
     
-    def copy_files(self, source_paths: List[str], destination: str) -> Dict[str, Any]:
-        """复制文件"""
+    except Exception as e:
+        logger.error(f"Error in move_files: {e}")
+        return f"Error: {str(e)}"
+
+@app.tool()
+def copy_files(source_paths: List[str], destination: str) -> str:
+    """Copy files to a destination directory
+    
+    Args:
+        source_paths: List of source file paths to copy
+        destination: Destination directory path
+    """
+    try:
         results = {"success": [], "failed": []}
         dest_path = Path(destination)
         
@@ -295,10 +379,20 @@ class AIFileManager:
             except Exception as e:
                 results["failed"].append({"path": source, "error": str(e)})
         
-        return results
+        return json.dumps(results, indent=2, ensure_ascii=False)
     
-    def delete_files(self, file_paths: List[str]) -> Dict[str, Any]:
-        """删除文件"""
+    except Exception as e:
+        logger.error(f"Error in copy_files: {e}")
+        return f"Error: {str(e)}"
+
+@app.tool()
+def delete_files(file_paths: List[str]) -> str:
+    """Delete files or directories
+    
+    Args:
+        file_paths: List of file or directory paths to delete
+    """
+    try:
         results = {"success": [], "failed": []}
         
         for file_path in file_paths:
@@ -315,192 +409,79 @@ class AIFileManager:
             except Exception as e:
                 results["failed"].append({"path": file_path, "error": str(e)})
         
-        return results
-    
-    def create_directory(self, dir_path: str) -> Dict[str, Any]:
-        """创建目录"""
-        try:
-            Path(dir_path).mkdir(parents=True, exist_ok=True)
-            return {"success": True, "path": dir_path}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-    
-    def compress_files(self, file_paths: List[str], output_path: str) -> Dict[str, Any]:
-        """压缩文件"""
-        try:
-            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for file_path in file_paths:
-                    path = Path(file_path)
-                    if path.exists():
-                        if path.is_file():
-                            zipf.write(str(path), path.name)
-                        elif path.is_dir():
-                            for file in path.rglob("*"):
-                                if file.is_file():
-                                    zipf.write(str(file), str(file.relative_to(path.parent)))
-            
-            return {"success": True, "output": output_path}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-# 创建MCP服务器实例
-server = Server("ai-file-manager")
-file_manager = AIFileManager()
-
-@server.list_tools()
-async def handle_list_tools() -> List[Tool]:
-    """列出可用工具"""
-    return [
-        Tool(
-            name="natural_language_file_operation",
-            description="Execute file operations using natural language commands",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Natural language command for file operation"
-                    }
-                },
-                "required": ["command"]
-            }
-        ),
-        Tool(
-            name="search_files",
-            description="Search for files based on criteria",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name_pattern": {"type": "string", "description": "File name pattern"},
-                    "file_type": {"type": "array", "items": {"type": "string"}, "description": "File extensions"},
-                    "path": {"type": "string", "description": "Search path"},
-                    "size_min": {"type": "integer", "description": "Minimum file size in bytes"},
-                    "size_max": {"type": "integer", "description": "Maximum file size in bytes"}
-                }
-            }
-        ),
-        Tool(
-            name="move_files",
-            description="Move files to a destination",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "source_paths": {"type": "array", "items": {"type": "string"}},
-                    "destination": {"type": "string"}
-                },
-                "required": ["source_paths", "destination"]
-            }
-        ),
-        Tool(
-            name="copy_files",
-            description="Copy files to a destination",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "source_paths": {"type": "array", "items": {"type": "string"}},
-                    "destination": {"type": "string"}
-                },
-                "required": ["source_paths", "destination"]
-            }
-        ),
-        Tool(
-            name="delete_files",
-            description="Delete files or directories",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "file_paths": {"type": "array", "items": {"type": "string"}}
-                },
-                "required": ["file_paths"]
-            }
-        ),
-        Tool(
-            name="compress_files",
-            description="Compress files into a ZIP archive",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "file_paths": {"type": "array", "items": {"type": "string"}},
-                    "output_path": {"type": "string"}
-                },
-                "required": ["file_paths", "output_path"]
-            }
-        )
-    ]
-
-@server.call_tool()
-async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-    """处理工具调用"""
-    try:
-        if name == "natural_language_file_operation":
-            command = arguments.get("command", "")
-            parsed = file_manager.parse_natural_language(command)
-            
-            intent = parsed["intent"]
-            entities = parsed["entities"]
-            
-            if intent == "search" or intent == "find" or intent == "list":
-                criteria = FileSearchCriteria(
-                    name_pattern="|".join(entities.get("keywords", [])) if entities.get("keywords") else None,
-                    file_type=entities.get("file_type"),
-                    size_min=entities.get("size_min"),
-                    size_max=entities.get("size_max"),
-                    date_from=entities.get("date_from"),
-                    date_to=entities.get("date_to"),
-                    path=entities.get("path")
-                )
-                results = file_manager.search_files(criteria)
-                return [TextContent(type="text", text=json.dumps(results, indent=2, ensure_ascii=False))]
-            
-            elif intent == "unknown":
-                return [TextContent(type="text", text=f"无法理解指令: {command}\n支持的操作: 搜索、移动、复制、删除、创建、压缩文件")]
-            
-            else:
-                return [TextContent(type="text", text=f"解析结果: {json.dumps(parsed, indent=2, ensure_ascii=False)}")]
-        
-        elif name == "search_files":
-            criteria = FileSearchCriteria(**arguments)
-            results = file_manager.search_files(criteria)
-            return [TextContent(type="text", text=json.dumps(results, indent=2, ensure_ascii=False))]
-        
-        elif name == "move_files":
-            results = file_manager.move_files(arguments["source_paths"], arguments["destination"])
-            return [TextContent(type="text", text=json.dumps(results, indent=2, ensure_ascii=False))]
-        
-        elif name == "copy_files":
-            results = file_manager.copy_files(arguments["source_paths"], arguments["destination"])
-            return [TextContent(type="text", text=json.dumps(results, indent=2, ensure_ascii=False))]
-        
-        elif name == "delete_files":
-            results = file_manager.delete_files(arguments["file_paths"])
-            return [TextContent(type="text", text=json.dumps(results, indent=2, ensure_ascii=False))]
-        
-        elif name == "compress_files":
-            results = file_manager.compress_files(arguments["file_paths"], arguments["output_path"])
-            return [TextContent(type="text", text=json.dumps(results, indent=2, ensure_ascii=False))]
-        
-        else:
-            return [TextContent(type="text", text=f"Unknown tool: {name}")]
+        return json.dumps(results, indent=2, ensure_ascii=False)
     
     except Exception as e:
-        logger.error(f"Error in tool {name}: {e}")
-        return [TextContent(type="text", text=f"Error: {str(e)}")]
+        logger.error(f"Error in delete_files: {e}")
+        return f"Error: {str(e)}"
 
-async def main():
-    """主函数"""
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="ai-file-manager",
-                server_version="1.0.0",
-                capabilities=server.get_capabilities(
-                    notification_options=None,
-                    experimental_capabilities=None,
-                ),
-            ),
-        )
+@app.tool()
+def create_directory(dir_path: str) -> str:
+    """Create a new directory
+    
+    Args:
+        dir_path: Path of the directory to create
+    """
+    try:
+        Path(dir_path).mkdir(parents=True, exist_ok=True)
+        result = {"success": True, "path": dir_path}
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    
+    except Exception as e:
+        logger.error(f"Error in create_directory: {e}")
+        result = {"success": False, "error": str(e)}
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+@app.tool()
+def compress_files(file_paths: List[str], output_path: str) -> str:
+    """Compress files into a ZIP archive
+    
+    Args:
+        file_paths: List of file or directory paths to compress
+        output_path: Output ZIP file path
+    """
+    try:
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in file_paths:
+                path = Path(file_path)
+                if path.exists():
+                    if path.is_file():
+                        zipf.write(str(path), path.name)
+                    elif path.is_dir():
+                        for file in path.rglob("*"):
+                            if file.is_file():
+                                zipf.write(str(file), str(file.relative_to(path.parent)))
+        
+        result = {"success": True, "output": output_path}
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    
+    except Exception as e:
+        logger.error(f"Error in compress_files: {e}")
+        result = {"success": False, "error": str(e)}
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+@app.tool()
+def extract_archive(archive_path: str, destination: str) -> str:
+    """Extract files from a ZIP archive
+    
+    Args:
+        archive_path: Path to the ZIP archive to extract
+        destination: Directory to extract files to
+    """
+    try:
+        dest_path = Path(destination)
+        dest_path.mkdir(parents=True, exist_ok=True)
+        
+        with zipfile.ZipFile(archive_path, 'r') as zipf:
+            zipf.extractall(str(dest_path))
+        
+        result = {"success": True, "destination": destination}
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    
+    except Exception as e:
+        logger.error(f"Error in extract_archive: {e}")
+        result = {"success": False, "error": str(e)}
+        return json.dumps(result, indent=2, ensure_ascii=False)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    app.run()
