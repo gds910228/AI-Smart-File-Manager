@@ -32,6 +32,7 @@
 4. **copy_files**: 复制文件到指定位置
 5. **delete_files**: 删除文件或目录
 6. **compress_files**: 压缩文件为ZIP格式
+7. **extract_stock_codes**: 从文件名中提取股票代码
 
 ## 安装和使用
 
@@ -73,6 +74,28 @@ python main.py
 ```
 
 **结果**: 自动识别MD文件，根据文件名中的公司名称创建对应文件夹并移动文件，形成整齐的分类目录结构。
+
+#### 股票代码提取示例
+**功能**: 从文件名中批量提取股票代码
+**使用场景**: 量化分析文件整理、股票代码统计等
+
+**工具调用**:
+```json
+{
+  "tool": "extract_stock_codes",
+  "arguments": {
+    "directory_path": "F:\\doc\\mine\\理财相关\\量化分析",
+    "output_file": "stock_codes.txt",
+    "use_precise_pattern": true
+  }
+}
+```
+
+**支持的文件名格式**:
+- `三一重工stock_analysis_sse_600031_20250808T040636.md` → 提取 `600031`
+- `科大讯飞stock_analysis_sse_002230_20250808T081955.md` → 提取 `002230`
+
+**结果**: 自动提取所有股票代码，去重排序后保存到文本文件，每个代码占一行。
 
 ### 在MCP客户端中使用
 配置完成后，就可以使用自然语言进行文件操作了。

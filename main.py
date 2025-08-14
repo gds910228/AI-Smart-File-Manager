@@ -179,8 +179,12 @@ class NLPProcessor:
         
         return entities
 
+# 导入股票代码提取器
+from stock_code_extractor import StockCodeExtractor
+
 # 全局实例
 nlp_processor = NLPProcessor()
+stock_extractor = StockCodeExtractor()
 
 def search_files(criteria: FileSearchCriteria) -> List[Dict[str, Any]]:
     """搜索文件"""
@@ -463,6 +467,28 @@ async def handle_list_tools() -> List[Tool]:
                 },
                 "required": ["archive_path", "destination"]
             }
+        ),
+        Tool(
+            name="extract_stock_codes",
+            description="Extract stock codes from filenames in a directory",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "directory_path": {
+                        "type": "string", 
+                        "description": "Directory path to scan for files with stock codes"
+                    },
+                    "output_file": {
+                        "type": "string", 
+                        "description": "Output file path to save extracted stock codes (optional)"
+                    },
+                    "use_precise_pattern": {
+                        "type": "boolean", 
+                        "description": "Whether to use precise pattern matching (default: true)"
+                    }
+                },
+                "required": ["directory_path"]
+            }
         )
     ]
 
@@ -523,6 +549,18 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
         
         elif name == "extract_archive":
             results = extract_archive_impl(arguments["archive_path"], arguments["destination"])
+            return [TextContent(type="text", text=json.dumps(results, indent=2, ensure_ascii=False))]
+        
+        elif name == "extract_stock_codes":
+            directory_path = arguments["directory_path"]
+            output_file = arguments.get("output_file", "stock_codes.txt")
+            use_precise_pattern = arguments.get("use_precise_pattern", True)
+            
+            results = stock_extractor.extract_and_save(
+                directory_path,
+                output_file,
+                use_precise_pattern
+            )
             return [TextContent(type="text", text=json.dumps(results, indent=2, ensure_ascii=False))]
         
         else:

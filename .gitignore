@@ -142,3 +142,10 @@ temp/
 operation_history.json
 python_files_backup.zip
 test_directory/
+
+# Stock code extractor temporary files
+stock_codes_*.txt
+extracted_*.txt
+extract_stock_codes_*.py
+stock_codes_result.txt
+stock_codes_clean.txt
